@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Media Scraper — Results</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <div id="panel-app">
+    <!-- Header bar -->
+    <header class="panel-header">
+      <h1 class="panel-title">🎬 Media Scraper</h1>
+      <div class="header-actions">
+        <button id="settings-btn" class="btn btn-icon" title="设置">⚙</button>
+        <button id="export-btn" class="btn btn-icon" title="导出">📤</button>
+      </div>
+    </header>
+
+    <!-- Meta info -->
+    <section class="meta-bar">
+      <span id="scrape-url" class="meta-url">—</span>
+      <span class="meta-sep">·</span>
+      <span id="scrape-time" class="meta-time">—</span>
+    </section>
+
+    <!-- Tabs -->
+    <nav class="tab-bar" role="tablist">
+      <!-- TODO: dynamically populate tab counts -->
+      <button class="tab active" role="tab" data-type="all">📷 全部 <span id="count-all">0</span></button>
+      <button class="tab" role="tab" data-type="image">🖼 图片 <span id="count-image">0</span></button>
+      <button class="tab" role="tab" data-type="video">🎬 视频 <span id="count-video">0</span></button>
+      <button class="tab" role="tab" data-type="audio">🎵 音频 <span id="count-audio">0</span></button>
+      <button class="tab" role="tab" data-type="document">📄 文档 <span id="count-document">0</span></button>
+    </nav>
+
+    <!-- Filter bar -->
+    <section class="filter-bar">
+      <label class="filter-group">
+        过滤:
+        <select id="type-filter" class="select">
+          <option value="all">全部</option>
+          <option value="image">图片</option>
+          <option value="video">视频</option>
+          <option value="audio">音频</option>
+          <option value="document">文档</option>
+        </select>
+      </label>
+      <label class="filter-group">
+        排序:
+        <select id="sort-filter" class="select">
+          <option value="size-desc">大小 ↓</option>
+          <option value="size-asc">大小 ↑</option>
+          <option value="name">名称</option>
+        </select>
+      </label>
+      <label class="filter-group">
+        尺寸 ≥
+        <input id="min-size" type="number" class="input-num" value="100" min="0" /> px
+      </label>
+    </section>
+
+    <!-- Grid preview -->
+    <main class="grid-container" id="results-grid" role="grid">
+      <!-- TODO: dynamically render media item cards -->
+      <p class="empty-state" id="empty-state">暂无结果。请先在 Popup 中开始抓取。</p>
+    </main>
+
+    <!-- Large image preview overlay (hidden by default) -->
+    <div id="preview-overlay" class="preview-overlay hidden">
+      <button id="preview-close" class="preview-close">✕</button>
+      <div class="preview-content">
+        <img id="preview-img" src="" alt="Preview" />
+        <div class="preview-meta">
+          <p id="preview-filename"></p>
+          <p id="preview-dimensions"></p>
+          <p id="preview-size"></p>
+          <p id="preview-source"></p>
+        </div>
+        <div class="preview-actions">
+          <button id="preview-download" class="btn btn-primary">下载</button>
+          <button id="preview-copy-link" class="btn btn-secondary">复制链接</button>
+          <button id="preview-open-tab" class="btn btn-secondary">在新标签页打开</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Selection bar (bottom) -->
+    <footer class="selection-bar">
+      <span class="selection-info" id="selection-info">已选 0/0 · 总大小 0 B</span>
+      <div class="selection-actions">
+        <button id="select-all-btn" class="btn btn-text">全选 (Ctrl+A)</button>
+        <button id="deselect-all-btn" class="btn btn-text">取消全选</button>
+        <div class="download-dropdown">
+          <button id="download-btn" class="btn btn-primary">下载选中 ▼</button>
+          <!-- TODO: dropdown with "下载选中", "下载全部", "复制链接列表" -->
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="panel.js"></script>
+</body>
+</html>

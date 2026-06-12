@@ -1,0 +1,23 @@
+{
+  "name": "@media-scraper/extension",
+  "version": "0.1.0",
+  "description": "Media Scraper Chrome Extension — extract media from any webpage",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo ok",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@media-scraper/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.270",
+    "typescript": "^5.5",
+    "vite": "^6",
+    "vitest": "^2"
+  }
+}

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Media Scraper</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <h1 class="title">🎬 Media Scraper</h1>
+    </header>
+
+    <!-- URL Input Area -->
+    <section class="url-section">
+      <label for="url-input" class="sr-only">输入网址</label>
+      <input
+        id="url-input"
+        type="url"
+        class="url-input"
+        placeholder="https://example.com"
+        autofocus
+      />
+      <!-- TODO: support multiple URL input (one per line) -->
+      <button id="add-url-btn" class="btn btn-text">+ 添加更多 URL</button>
+    </section>
+
+    <!-- Action Buttons -->
+    <section class="actions">
+      <button id="grab-current-btn" class="btn btn-primary">
+        📄 抓当前页面
+      </button>
+      <button id="batch-scrape-btn" class="btn btn-secondary">
+        📦 批量抓取
+      </button>
+      <!-- TODO: show during scraping, hidden by default -->
+      <button id="stop-btn" class="btn btn-danger hidden">
+        ■ 停止抓取
+      </button>
+    </section>
+
+    <!-- Footer Links -->
+    <footer class="footer">
+      <button id="history-btn" class="btn btn-link">📋 历史</button>
+      <button id="settings-btn" class="btn btn-link">⚙ 设置</button>
+    </footer>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

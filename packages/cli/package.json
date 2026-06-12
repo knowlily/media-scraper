@@ -1,0 +1,28 @@
+{
+  "name": "@media-scraper/cli",
+  "version": "0.1.0",
+  "description": "Media Scraper CLI — extract media from URLs via command line",
+  "type": "module",
+  "bin": {
+    "media-scraper": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo ok",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@media-scraper/core": "workspace:*",
+    "playwright": "^1.48",
+    "commander": "^12"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.5",
+    "vitest": "^2"
+  }
+}

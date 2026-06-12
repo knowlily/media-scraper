@@ -1,0 +1,31 @@
+{
+  "name": "@media-scraper/mcp",
+  "version": "0.1.0",
+  "description": "Media Scraper MCP Server — scrape media from URLs via Hermes Agent",
+  "type": "module",
+  "bin": {
+    "media-scraper-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "api": "node dist/api.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo ok",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@media-scraper/cli": "workspace:*",
+    "@media-scraper/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1",
+    "playwright": "^1.50",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.5",
+    "vitest": "^2"
+  }
+}
