@@ -47,6 +47,40 @@ const videos = extractVideos(documentAdapter, 'https://example.com');
 
 详见 [packages/core/README.md](packages/core/README.md)。
 
+## 使用方法
+
+### 方式一：嵌入代码
+
+```bash
+pnpm add @media-scraper/core
+```
+
+```ts
+import { scrape } from '@media-scraper/core';
+
+const result = await scrape({ url: 'https://example.com' });
+// result.images  result.videos  result.audio  result.documents
+```
+
+### 方式二：HTTP API
+
+```bash
+cd packages/mcp
+npm install playwright
+npx playwright install chromium
+node dist/api.js
+```
+
+```bash
+curl -X POST http://localhost:3456/scrape \
+  -H 'Content-Type: application/json' \
+  -d '{"url": "https://example.com", "types": ["image", "video"]}'
+```
+
+### 方式三：MCP Server
+
+挂载到 Hermes Agent 或其他 MCP 客户端，提供 `scrape_media` 和 `download_media` 工具。
+
 ## 设计亮点
 
 - **扩展模式零反爬**：运行在用户真实浏览器中
