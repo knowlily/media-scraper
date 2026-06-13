@@ -154,6 +154,9 @@ describe('messages.ts — type guards', () => {
         audio: [],
         documents: [],
         warnings: [],
+        errors: [],
+        partial: false,
+        stats: { durationMs: 0, domNodeCount: 0, deduplicatedCount: 0, filteredCount: 0 },
         duration: 0,
         timestamp: new Date().toISOString(),
       };
