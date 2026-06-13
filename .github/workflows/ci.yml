@@ -36,23 +36,7 @@ jobs:
       - name: Install Playwright
         run: cd packages/mcp && pnpm exec playwright install chromium --with-deps
 
-      - name: Test core
-        run: pnpm --filter=@media-scraper/core test
-
-      - name: Test dedupe
-        run: pnpm --filter=@media-scraper/dedupe test
-
-      - name: Test downloader
-        run: pnpm --filter=@media-scraper/downloader test
-
-      - name: Test cli
-        run: pnpm --filter=@media-scraper/cli test
-
-      - name: Test extension
-        run: pnpm --filter=@media-scraper/extension test
-
-      - name: Test browser
-        run: pnpm --filter=@media-scraper/browser test
-
-      - name: Test mcp
-        run: pnpm --filter=@media-scraper/mcp test
+      - name: Test
+        run: pnpm -r test
+        env:
+          CI: true
