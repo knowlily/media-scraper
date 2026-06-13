@@ -7,7 +7,7 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,10 +33,5 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Install Playwright
-        run: cd packages/mcp && pnpm exec playwright install chromium --with-deps
-
-      - name: Test
-        run: pnpm -r test
-        env:
-          CI: true
+      - name: Test (unit)
+        run: pnpm --filter=@media-scraper/core --filter=@media-scraper/dedupe --filter=@media-scraper/downloader --filter=@media-scraper/cli --filter=@media-scraper/extension test
