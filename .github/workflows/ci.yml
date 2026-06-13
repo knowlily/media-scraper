@@ -34,7 +34,7 @@ jobs:
         run: pnpm run typecheck
 
       - name: Install Playwright
-        run: npx playwright install chromium --with-deps
+        run: cd packages/mcp && pnpm exec playwright install chromium --with-deps
 
       - name: Test
         run: pnpm run test
