@@ -114,7 +114,6 @@ export function isMediaUrl(url: string): MediaType | null {
     // Videos
     case '.mp4':
     case '.webm':
-    case '.ogg':
     case '.ogv':
     case '.mov':
     case '.avi':
@@ -130,6 +129,7 @@ export function isMediaUrl(url: string): MediaType | null {
     case '.wav':
     case '.flac':
     case '.aac':
+    case '.ogg':
     case '.opus':
     case '.m4a':
     case '.weba':

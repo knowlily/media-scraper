@@ -4,20 +4,21 @@
 
 import type {
   DocumentLike,
+  DeduplicatorLike,
   MediaResource,
+  ScrapeError,
   ScrapeOptions,
   ScrapeResult,
 } from './types.js';
 
-import { extractImages } from './extractors/images.js';
-import { extractVideos } from './extractors/videos.js';
-import { extractAudio } from './extractors/audio.js';
-import { extractDocuments } from './extractors/documents.js';
 import { extractBackgroundImages } from './extractors/backgrounds.js';
-import { extractIframeMedia } from './extractors/iframes.js';
-import { extractShadowDomMedia } from './extractors/shadow-dom.js';
 
 import { deduplicate, filterByType } from './filters.js';
+import { scrapeStream } from './output/stream.js';
+import type { StreamYield } from './output/stream.js';
+import { BUILTIN_PARSERS } from './parsers/builtin.js';
+import type { MediaParser } from './parsers/types.js';
+import type { FilterChain } from './filters/chain.js';
 
 // ---------------------------------------------------------------------------
 // Categorization helper
@@ -94,6 +95,7 @@ export function categorizeResources(
  * @param name - Human-readable name of the extractor (for error logging).
  * @param fn - The extractor function to call.
  * @param args - Arguments to forward to the extractor.
+ * @param errors - Optional array to append ScrapeError entries to.
  * @returns The resources extracted, or an empty array if the extractor threw.
  *
  * @internal
@@ -101,12 +103,20 @@ export function categorizeResources(
 function safeExtract(
   name: string,
   fn: (...args: unknown[]) => MediaResource[],
+  errors: ScrapeError[],
   ...args: unknown[]
 ): MediaResource[] {
   try {
     return fn(...args);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error(`[media-scraper] ${name} extractor failed:`, err);
+    errors.push({
+      phase: name,
+      type: 'parse',
+      message,
+      recoverable: true,
+    });
     return [];
   }
 }
@@ -154,68 +164,68 @@ export async function scrape(
   options: ScrapeOptions = {} as ScrapeOptions,
 ): Promise<ScrapeResult> {
   const startTime = Date.now();
+  const errors: ScrapeError[] = [];
+  const warnings: string[] = [];
 
   // ------------------------------------------------------------------
-  // Phase 1 — Extract (P0 → P1 → P2 priority order)
+  // Phase 1 — Extract background images separately (to capture warnings)
   // ------------------------------------------------------------------
 
-  const allResources: MediaResource[] = [
-    // P0 — primary images
-    ...safeExtract(
-      'images',
-      extractImages as (...args: unknown[]) => MediaResource[],
-      doc,
-      baseUrl,
-    ),
-    // P1 — high-value secondary sources
-    ...safeExtract(
-      'videos',
-      extractVideos as (...args: unknown[]) => MediaResource[],
-      doc,
-      baseUrl,
-    ),
-    ...safeExtract(
-      'background-images',
-      extractBackgroundImages as (...args: unknown[]) => MediaResource[],
-      doc,
-      baseUrl,
-    ),
-    ...safeExtract(
-      'iframe-media',
-      extractIframeMedia as (...args: unknown[]) => MediaResource[],
-      doc,
-      baseUrl,
-    ),
-    // P2 — remaining sources
-    ...safeExtract(
-      'audio',
-      extractAudio as (...args: unknown[]) => MediaResource[],
-      doc,
-      baseUrl,
-    ),
-    ...safeExtract(
-      'documents',
-      extractDocuments as (...args: unknown[]) => MediaResource[],
-      doc,
-      baseUrl,
-    ),
-    ...safeExtract(
-      'shadow-dom',
-      extractShadowDomMedia as (...args: unknown[]) => MediaResource[],
-      doc,
-      baseUrl,
-    ),
-  ];
+  const bgResources: MediaResource[] = (() => {
+    try {
+      const bgResult = extractBackgroundImages(doc, baseUrl);
+      warnings.push(...bgResult.warnings);
+      return bgResult.resources;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[media-scraper] background-images extractor failed:', err);
+      errors.push({
+        phase: 'background',
+        type: 'parse',
+        message,
+        recoverable: true,
+      });
+      return [];
+    }
+  })();
 
   // ------------------------------------------------------------------
-  // Phase 2 — Deduplicate
+  // Phase 2 — Stream-scrape remaining media via parsers (excluding background)
   // ------------------------------------------------------------------
 
+  const nonBgParsers = BUILTIN_PARSERS.filter((p) => p.name !== 'background');
+  const stream = scrapeStream(doc, baseUrl, { parsers: nonBgParsers });
+
+  const streamResources: MediaResource[] = [];
+  for await (const frame of stream) {
+    streamResources.push(...frame.items);
+    // Collect any errors from the stream phases
+    for (const e of frame.errors) {
+      if (!errors.some((existing) => existing.phase === e.phase && existing.message === e.message)) {
+        errors.push(e);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Phase 3 — Merge all resources
+  // ------------------------------------------------------------------
+
+  const allResources: MediaResource[] = [...bgResources, ...streamResources];
+
+  // ------------------------------------------------------------------
+  // Phase 4 — Deduplicate
+  // ------------------------------------------------------------------
+
+  const beforeDedup = allResources.length;
   let resources = deduplicate(allResources);
+  const deduplicatedCount = beforeDedup - resources.length;
 
   // ------------------------------------------------------------------
-  // Phase 3 — Filter (optional)
+  // Phase 5 — Filter (optional)
   // ------------------------------------------------------------------
+
+  const beforeFilter = resources.length;
 
   if (options.types && options.types.length > 0) {
     resources = filterByType(resources, options.types);
@@ -227,14 +237,16 @@ export async function scrape(
     );
   }
 
+  const filteredCount = beforeFilter - resources.length;
+
   // ------------------------------------------------------------------
-  // Phase 4 — Categorize
+  // Phase 6 — Categorize
   // ------------------------------------------------------------------
 
   const categorized = categorizeResources(resources);
 
   // ------------------------------------------------------------------
-  // Phase 5 — Build result
+  // Phase 7 — Build result
   // ------------------------------------------------------------------
 
   const duration = Date.now() - startTime;
@@ -247,7 +259,214 @@ export async function scrape(
     videos: categorized.videos,
     audio: categorized.audio,
     documents: categorized.documents,
+    warnings,
     duration,
     timestamp: new Date().toISOString(),
+    errors,
+    partial: errors.length > 0,
+    stats: {
+      durationMs: duration,
+      domNodeCount: 0,
+      deduplicatedCount,
+      filteredCount,
+    },
   };
+}
+
+// ---------------------------------------------------------------------------
+// MediaScraper class (V2)
+// ---------------------------------------------------------------------------
+
+/** Options for constructing a {@link MediaScraper}. */
+export interface MediaScraperOptions {
+  /** Parsers to use (defaults to 7 built-in parsers). */
+  parsers?: MediaParser[];
+  /** Optional filter chain. */
+  filters?: FilterChain;
+  /** Optional deduplicator (falls back to `deduplicate()`). */
+  deduplicator?: DeduplicatorLike;
+  /** Optional output configuration. */
+  output?: {
+    /** Base output directory for downloads. */
+    dir?: string;
+  };
+}
+
+/**
+ * Configurable media scraper that supports custom parsers, filters,
+ * and deduplication strategies.
+ *
+ * @example
+ * ```ts
+ * const scraper = new MediaScraper({
+ *   parsers: [ImageParser, VideoParser],
+ *   filters: new FilterChain().minResolution(200, 200),
+ * });
+ * const result = await scraper.scrape(doc, 'https://example.com');
+ * ```
+ *
+ * @public
+ */
+export class MediaScraper {
+  private readonly parsers: MediaParser[];
+  private readonly filters?: FilterChain;
+  private readonly deduplicator?: DeduplicatorLike;
+  private readonly outputOptions?: { dir?: string };
+
+  constructor(options: MediaScraperOptions = {}) {
+    this.parsers = options.parsers ?? BUILTIN_PARSERS;
+    this.filters = options.filters;
+    this.deduplicator = options.deduplicator;
+    this.outputOptions = options.output;
+  }
+
+  /**
+   * Full batch scrape — runs all parsers and returns a complete
+   * {@link ScrapeResult}.
+   *
+   * @param doc - The parsed DOM document.
+   * @param url - The page URL.
+   * @returns A promise that resolves with the scrape result.
+   */
+  async scrape(doc: DocumentLike, url: string): Promise<ScrapeResult> {
+    const startTime = Date.now();
+    const errors: ScrapeError[] = [];
+    const warnings: string[] = [];
+
+    // Separate background parser for warnings
+    const bgParser = this.parsers.find((p) => p.name === 'background');
+    const nonBgParsers = this.parsers.filter((p) => p.name !== 'background');
+
+    // Extract background resources with warnings
+    let bgResources: MediaResource[] = [];
+    if (bgParser) {
+      try {
+        const bgResult = extractBackgroundImages(doc, url);
+        warnings.push(...bgResult.warnings);
+        bgResources = bgResult.resources;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push({ phase: 'background', type: 'parse', message, recoverable: true });
+      }
+    }
+
+    // Stream-scrape remaining parsers
+    const stream = scrapeStream(doc, url, { parsers: nonBgParsers });
+    const streamResources: MediaResource[] = [];
+    for await (const frame of stream) {
+      streamResources.push(...frame.items);
+      for (const e of frame.errors) {
+        if (!errors.some((existing) => existing.phase === e.phase && existing.message === e.message)) {
+          errors.push(e);
+        }
+      }
+    }
+
+    // Merge
+    let resources: MediaResource[] = [...bgResources, ...streamResources];
+
+    // Deduplicate
+    const beforeDedup = resources.length;
+    if (this.deduplicator) {
+      resources = this.deduplicator.deduplicate(resources);
+    } else {
+      resources = deduplicate(resources);
+    }
+    const deduplicatedCount = beforeDedup - resources.length;
+
+    // Filter
+    const beforeFilter = resources.length;
+    if (this.filters) {
+      resources = this.filters.apply(resources);
+    }
+    const filteredCount = beforeFilter - resources.length;
+
+    // Categorize
+    const categorized = categorizeResources(resources);
+
+    const duration = Date.now() - startTime;
+
+    return {
+      url,
+      title: doc.title || '',
+      total: resources.length,
+      images: categorized.images,
+      videos: categorized.videos,
+      audio: categorized.audio,
+      documents: categorized.documents,
+      warnings,
+      duration,
+      timestamp: new Date().toISOString(),
+      errors,
+      partial: errors.length > 0,
+      stats: {
+        durationMs: duration,
+        domNodeCount: 0,
+        deduplicatedCount,
+        filteredCount,
+      },
+    };
+  }
+
+  /**
+   * Streaming scrape — yields results after each parser phase.
+   *
+   * @param doc - The parsed DOM document.
+   * @param url - The page URL.
+   * @returns An async generator of {@link StreamYield} frames.
+   */
+  async *scrapeStream(
+    doc: DocumentLike,
+    url: string,
+  ): AsyncGenerator<StreamYield, void, unknown> {
+    const parsers = this.parsers;
+    if (parsers.length === 0) return;
+
+    // Handle background parser first for warnings
+    const bgParser = parsers.find((p) => p.name === 'background');
+    const nonBgParsers = parsers.filter((p) => p.name !== 'background');
+
+    const cumulative: MediaResource[] = [];
+
+    // Background first if present
+    if (bgParser) {
+      let items: MediaResource[] = [];
+      try {
+        items = extractBackgroundImages(doc, url).resources;
+      } catch {
+        items = [];
+      }
+      cumulative.push(...items);
+      yield {
+        phase: bgParser.phase,
+        items,
+        cumulative: [...cumulative],
+        progress: 1 / (parsers.length + 1),
+        errors: [],
+        partial: false,
+        stats: {
+          durationMs: Date.now() - Date.now(),
+          domNodeCount: 0,
+          deduplicatedCount: 0,
+          filteredCount: 0,
+        },
+      };
+    }
+
+    // Stream remaining parsers
+    const stream = scrapeStream(doc, url, { parsers: nonBgParsers });
+    for await (const frame of stream) {
+      // Forward the frame since it already has errors, partial, stats
+      cumulative.push(...frame.items);
+      yield {
+        phase: frame.phase,
+        items: frame.items,
+        cumulative: [...cumulative],
+        progress: frame.progress,
+        errors: [...frame.errors],
+        partial: frame.partial,
+        stats: { ...frame.stats },
+      };
+    }
+  }
 }

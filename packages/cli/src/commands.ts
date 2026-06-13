@@ -2,9 +2,9 @@
  * Command implementations for the media-scraper CLI.
  */
 
-import type { ScrapeResult } from '@media-scraper/core';
 import { launch, loadPage, executeExtraction, scrollToTriggerLazy, getPageMetrics, close } from './browser.js';
 import { downloadBatch } from './downloader.js';
+import type { DownloadProgress } from '@media-scraper/downloader';
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
@@ -20,6 +20,25 @@ interface CliOptions {
   json?: boolean;
 }
 
+/** CLI-specific scrape result with flat resource list for download. */
+export interface CliScrapeResult {
+  url: string;
+  title: string;
+  loadTimeMs: number;
+  resources: Array<{
+    url: string;
+    type: string;
+    size: number | null;
+    filename: string;
+  }>;
+  warnings: string[];
+  errors: string[];
+  stats: {
+    totalFound: number;
+    byType: Record<string, number>;
+  };
+}
+
 function parseMediaTypes(raw: string): string[] {
   return raw
     .split(',')
@@ -28,19 +47,22 @@ function parseMediaTypes(raw: string): string[] {
 }
 
 /**
- * Execute a full scrape against `url`, returning a ScrapeResult.
+ * Execute a full scrape against `url`, returning a CliScrapeResult.
  */
 export async function scrapeCommand(
   url: string,
   options: CliOptions,
-): Promise<ScrapeResult> {
-  const { browser, context } = await launch({
+): Promise<CliScrapeResult> {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  const { browser } = await launch({
     proxy: options.proxy,
     userAgent: options.userAgent,
     timeout: options.timeout,
   });
 
-  const page = await loadPage(context, url, { timeout: options.timeout });
+  const page = await loadPage(browser, url, { timeout: options.timeout });
 
   // Scroll to trigger lazy-loading images / infinite-scroll content
   if (options.maxPages && options.maxPages > 1) {
@@ -60,11 +82,37 @@ export async function scrapeCommand(
 
   await close(browser);
 
+  // ── Compute stats ──────────────────────────────────────────────────
+  const byType: Record<string, number> = {};
+  for (const r of result.resources) {
+    byType[r.type] = (byType[r.type] || 0) + 1;
+  }
+  const stats = {
+    totalFound: result.resources.length,
+    byType,
+  };
+
+  // ── Check for partial results ──────────────────────────────────────
+  if (result.resources.length === 0 && mediaTypes.length > 0) {
+    warnings.push(`No media resources found for URL: ${url}`);
+  }
+
+  // Print warnings to stderr
+  for (const w of warnings) {
+    process.stderr.write(`[WARN] ${w}\n`);
+  }
+  for (const e of errors) {
+    process.stderr.write(`[ERROR] ${e}\n`);
+  }
+
   return {
-    ...result,
-    pageTitle: metrics.title,
-    pageUrl: url,
+    url,
+    title: metrics.title,
     loadTimeMs: metrics.loadTimeMs,
+    resources: result.resources,
+    warnings,
+    errors,
+    stats,
   };
 }
 
@@ -74,15 +122,27 @@ export async function scrapeCommand(
 export async function downloadCommand(
   url: string,
   options: CliOptions,
-): Promise<ScrapeResult & { downloaded: string[] }> {
+): Promise<CliScrapeResult & { downloaded: string[] }> {
   const scrapeResult = await scrapeCommand(url, options);
 
   const outputDir = options.output ?? './media-scraper-output';
+
+  // ── Progress callback for DownloadManager ──────────────────────────
+  const onProgress = (progress: DownloadProgress): void => {
+    const pct =
+      progress.total > 0
+        ? ((progress.completed / progress.total) * 100).toFixed(1)
+        : '0.0';
+    process.stderr.write(
+      `\r  [download] ${progress.completed}/${progress.total} (${pct}%)  ${progress.currentUrl || ''}    `,
+    );
+  };
 
   const downloaded = await downloadBatch(
     scrapeResult.resources,
     outputDir,
     options.concurrency ?? 5,
+    { onProgress },
   );
 
   return { ...scrapeResult, downloaded };
@@ -94,7 +154,7 @@ export async function downloadCommand(
 export async function batchCommand(
   file: string,
   options: CliOptions,
-): Promise<ScrapeResult[]> {
+): Promise<CliScrapeResult[]> {
   const { readFileSync } = await import('node:fs');
 
   const raw = readFileSync(file, 'utf-8');
@@ -103,7 +163,7 @@ export async function batchCommand(
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith('#'));
 
-  const results: ScrapeResult[] = [];
+  const results: CliScrapeResult[] = [];
 
   const concurrency = options.concurrency ?? 1;
 

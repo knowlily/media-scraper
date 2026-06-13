@@ -1,150 +1,55 @@
-/**
- * Media Scraper — Type-Safe Message Passing
- *
- * Discriminated unions for all postMessage messages exchanged between:
- * - Popup ↔ Background Service Worker
- * - Content Script ↔ Background Service Worker
- * - Panel ↔ Background Service Worker
- */
+// ---------------------------------------------------------------------------
+// Media Scraper Extension — type-safe message passing
+// ---------------------------------------------------------------------------
 
-// ── Base Types ─────────────────────────────────────────────────────
+import type { MediaResource, ScrapeResult } from '@media-scraper/core';
 
-export interface MediaItem {
-  id: string;
-  url: string;
-  type: 'image' | 'video' | 'audio' | 'document';
-  width?: number;
-  height?: number;
-  size?: number; // file size in bytes
-  alt?: string;
-  title?: string;
-  thumbnail?: string; // data URL from thumbnail cache
-  sourceUrl?: string; // original page URL
-  filename?: string;
-  isStreaming?: boolean; // true if m3u8/mpd — can't download via chrome.downloads
-}
+export type { MediaResource, ScrapeResult };
 
-export interface ScrapeResult {
-  url: string;
-  results: MediaItem[];
-  timestamp: number;
-  duration?: number;
-  errors?: string[];
-}
-
-// ── Generic Response ───────────────────────────────────────────────
-
-export interface MessageResponse {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-}
-
-// ── Discriminated Union: Messages to Background SW ─────────────────
-
-export interface ScrapeResultsMessage {
-  type: 'SCRAPE_RESULTS';
-  data: ScrapeResult;
-}
-
-export interface GetResultsMessage {
-  type: 'GET_RESULTS';
-}
-
-export interface FetchThumbnailMessage {
-  type: 'FETCH_THUMBNAIL';
-  url: string;
-}
-
-export interface DownloadMessage {
-  type: 'DOWNLOAD';
-  urls: string[];
-  filenames?: string[];
-}
-
-export interface CancelDownloadsMessage {
-  type: 'CANCEL_DOWNLOADS';
-}
-
-export interface ClearResultsMessage {
-  type: 'CLEAR_RESULTS';
-}
-
-export type BackgroundMessage =
-  | ScrapeResultsMessage
-  | GetResultsMessage
-  | FetchThumbnailMessage
-  | DownloadMessage
-  | CancelDownloadsMessage
-  | ClearResultsMessage;
-
-// ── Discriminated Union: Messages to Content Script ────────────────
-
-export interface StartScrapeMessage {
-  type: 'START_SCRAPE';
-  options?: {
-    maxScrolls?: number;
-    maxTime?: number;
-    includeBackgrounds?: boolean;
-    minSizePx?: number;
-  };
-}
-
-export interface StopScrapeMessage {
-  type: 'STOP_SCRAPE';
-}
-
-export interface PingMessage {
-  type: 'PING';
-}
-
-export type ContentMessage = StartScrapeMessage | StopScrapeMessage | PingMessage;
-
-export type ContentResponse = MessageResponse;
-
-// ── Discriminated Union: Messages from Popup to Background SW ──────
-
-export interface PopupGrabCurrentMessage {
-  type: 'GRAB_CURRENT_PAGE';
-}
-
-export interface PopupBatchScrapeMessage {
-  type: 'BATCH_SCRAPE';
-  urls: string[];
-}
-
-export interface PopupStopMessage {
-  type: 'STOP_SCRAPE';
-}
-
-export interface PopupOpenPanelMessage {
-  type: 'OPEN_PANEL';
-}
+// ---------------------------------------------------------------------------
+// Popup → Content Script
+// ---------------------------------------------------------------------------
 
 export type PopupMessage =
-  | PopupGrabCurrentMessage
-  | PopupBatchScrapeMessage
-  | PopupStopMessage
-  | PopupOpenPanelMessage;
+  | { type: 'START_SCRAPE'; url: string }
+  | { type: 'STOP_SCRAPE' }
+  | { type: 'GET_HISTORY' }
+  | { type: 'PLAY_VIDEO'; url: string };
 
-// ── Discriminated Union: Messages from Panel to Background SW ──────
+// ---------------------------------------------------------------------------
+// Content Script → Background / Popup
+// ---------------------------------------------------------------------------
 
-export interface PanelGetResultsMessage {
-  type: 'GET_RESULTS';
-}
+export type ContentMessage =
+  | { type: 'SCRAPE_PROGRESS'; found: number; total?: number }
+  | { type: 'FOUND_MEDIA'; items: MediaResource[]; phase: string }
+  | { type: 'SCRAPE_COMPLETE'; total: number }
+  | { type: 'SCRAPE_ERROR'; error: string };
 
-export interface PanelDownloadMessage {
-  type: 'DOWNLOAD_SELECTED';
-  ids: string[];
-}
+// ---------------------------------------------------------------------------
+// Content Script / Panel → Background
+// ---------------------------------------------------------------------------
 
-export interface PanelExportMessage {
-  type: 'EXPORT';
-  format: 'json' | 'csv';
-  ids?: string[]; // undefined = all
-}
+export type BackgroundMessage =
+  | { type: 'DOWNLOAD'; resources: MediaResource[] }
+  | { type: 'FETCH_THUMBNAIL'; url: string }
+  | { type: 'FETCH_VIDEO_SIZE'; url: string }
+  | { type: 'CLEAR_CACHE' };
+
+// ---------------------------------------------------------------------------
+// Background → Extension Pages (popup; panel removed — sidebar is in-page)
+// ---------------------------------------------------------------------------
 
 export type PanelMessage =
-  | PanelGetResultsMessage
-  | PanelDownloadMessage
-  | PanelExportMessage;
+  | { type: 'DOWNLOAD_COMPLETE'; count: number; failed: string[] }
+  | { type: 'DOWNLOAD_PROGRESS'; completed: number; total: number };
+
+// ---------------------------------------------------------------------------
+// Union of all message types
+// ---------------------------------------------------------------------------
+
+export type ExtensionMessage =
+  | PopupMessage
+  | ContentMessage
+  | BackgroundMessage
+  | PanelMessage;

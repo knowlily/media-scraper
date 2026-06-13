@@ -3,71 +3,16 @@
 // ---------------------------------------------------------------------------
 
 import type { DocumentLike, ElementLike, MediaResource, MediaSource } from '../types.js';
+import { getExtension, isMediaUrl } from '../utils.js';
 import {
-  generateId,
-  extractFilename,
-  getExtension,
-  isMediaUrl,
-} from '../utils.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve a potentially-relative URL against a base URL.
- * Returns `null` when the URL is empty, a data: URI, or otherwise unresolvable.
- */
-function resolveUrl(href: string, baseUrl: string): string | null {
-  if (!href) return null;
-  const trimmed = href.trim();
-  if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return null;
-  try {
-    return new URL(trimmed, baseUrl).href;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Build a MediaResource with sensible defaults.
- */
-function makeResource(
-  url: string,
-  source: MediaSource,
-  thumbnail?: string,
-): MediaResource {
-  return {
-    id: generateId(),
-    url,
-    type: 'video',
-    filename: extractFilename(url),
-    extension: getExtension(url),
-    size: 0,
-    width: 0,
-    height: 0,
-    thumbnail: thumbnail ?? '',
-    source,
-  };
-}
+  resolveUrl,
+  makeResource,
+  VIDEO_EXTENSIONS,
+} from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Video file extensions (used for <a href> link detection)
 // ---------------------------------------------------------------------------
-
-const VIDEO_EXTENSIONS = new Set([
-  '.mp4',
-  '.webm',
-  '.ogg',
-  '.ogv',
-  '.mov',
-  '.avi',
-  '.mkv',
-  '.flv',
-  '.wmv',
-  '.m4v',
-  '.3gp',
-]);
 
 function hasVideoExtension(url: string): boolean {
   const ext = getExtension(url);
@@ -108,7 +53,8 @@ function extractFromVideoElements(
         const url = resolveUrl(src, baseUrl);
         if (url) {
           const streamSrc = detectStreamingType(url);
-          results.push(makeResource(url, streamSrc ?? 'video', posterUrl ?? undefined));
+          results.push(makeResource(url, 'video', streamSrc ?? 'video',
+            posterUrl ? { thumbnail: posterUrl } : undefined));
         }
       }
 
@@ -122,7 +68,8 @@ function extractFromVideoElements(
             if (url) {
               const streamSrc = detectStreamingType(url);
               // Only set poster on the first source (the primary one)
-              results.push(makeResource(url, streamSrc ?? 'video', posterUrl ?? undefined));
+              results.push(makeResource(url, 'video', streamSrc ?? 'video',
+                posterUrl ? { thumbnail: posterUrl } : undefined));
               posterUrl = null; // only first source gets poster
             }
           }
@@ -158,20 +105,21 @@ function extractFromVideoLinks(
       const embed = detectEmbed(url);
       if (embed) {
         const pageUrl = buildCanonicalUrl(embed.provider, embed.id);
-        results.push(makeResource(pageUrl, 'iframe', embed.thumbnail));
+        results.push(makeResource(pageUrl, 'video', 'iframe',
+          embed.thumbnail ? { thumbnail: embed.thumbnail } : undefined));
         continue;
       }
 
       // Check if the URL is a video file
       if (hasVideoExtension(url)) {
-        results.push(makeResource(url, 'link'));
+        results.push(makeResource(url, 'video', 'link'));
         continue;
       }
 
       // Check for streaming URLs
       const streamSrc = detectStreamingType(url);
       if (streamSrc) {
-        results.push(makeResource(url, streamSrc));
+        results.push(makeResource(url, 'video', streamSrc));
       }
     } catch {
       // Skip
@@ -228,7 +176,7 @@ function extractStreamUrlsFromScripts(
 
         const url = resolveUrl(rawUrl, baseUrl);
         if (url && detectStreamingType(url) === 'm3u8') {
-          results.push(makeResource(url, 'm3u8'));
+          results.push(makeResource(url, 'video', 'm3u8'));
         }
       }
 
@@ -241,7 +189,7 @@ function extractStreamUrlsFromScripts(
 
         const url = resolveUrl(rawUrl, baseUrl);
         if (url && detectStreamingType(url) === 'mpd') {
-          results.push(makeResource(url, 'mpd'));
+          results.push(makeResource(url, 'video', 'mpd'));
         }
       }
     } catch {
@@ -421,7 +369,8 @@ function extractFromIframeEmbeds(
       const embed = detectEmbed(absoluteSrc);
       if (embed) {
         const pageUrl = buildCanonicalUrl(embed.provider, embed.id);
-        results.push(makeResource(pageUrl, 'iframe', embed.thumbnail));
+        results.push(makeResource(pageUrl, 'video', 'iframe',
+          embed.thumbnail ? { thumbnail: embed.thumbnail } : undefined));
       }
     } catch {
       // Skip
@@ -434,46 +383,138 @@ function extractFromIframeEmbeds(
 //    (Douyin, TikTok, etc. embed actual video URLs in JSON/page data)
 // ---------------------------------------------------------------------------
 
-/** Known video CDN domains for popular platforms. */
-const PLATFORM_VIDEO_CDNS: { pattern: RegExp; provider: string }[] = [
-  { pattern: /douyinvod\.com/i, provider: 'douyin' },
-  { pattern: /tiktokcdn\.(com|us|org)/i, provider: 'tiktok' },
-  { pattern: /ixigua\.com/i, provider: 'xigua' },
-  { pattern: /kwai\w*\.com/i, provider: 'kuaishou' },
-];
+import type { PlatformExtractor } from '../types.js';
+
+/** Registry of platform-specific CDN video extractors. */
+const platformExtractors: PlatformExtractor[] = [];
+
+// Built-in extractors
+
+/** Douyin (抖音) CDN extractor. */
+const douyinExtractor: PlatformExtractor = {
+  name: 'douyin',
+  cdnPatterns: [/douyinvod\.com/i],
+  coverPatterns: [/douyinpic/i],
+  extract(rawUrl: string, baseUrl: string, _covers: string[]): MediaResource | null {
+    const cleanUrl = rawUrl.replace(/\\\//g, '/');
+    const url = resolveUrl(cleanUrl, baseUrl);
+    if (!url) return null;
+    const streamType = detectStreamingType(url);
+    return makeResource(url, 'video', streamType ?? 'video');
+  },
+};
+
+/** TikTok CDN extractor. */
+const tiktokExtractor: PlatformExtractor = {
+  name: 'tiktok',
+  cdnPatterns: [/tiktokcdn\.(com|us|org)/i],
+  coverPatterns: [/tiktokcdn.*?(?:thumb|cover)/i],
+  extract(rawUrl: string, baseUrl: string, covers: string[]): MediaResource | null {
+    const cleanUrl = rawUrl.replace(/\\\//g, '/');
+    const url = resolveUrl(cleanUrl, baseUrl);
+    if (!url) return null;
+    const streamType = detectStreamingType(url);
+    const thumb = covers.length > 0 ? covers[0] : '';
+    return makeResource(url, 'video', streamType ?? 'video',
+      thumb ? { thumbnail: thumb } : undefined);
+  },
+};
+
+/** Xigua (西瓜视频) CDN extractor. */
+const xiguaExtractor: PlatformExtractor = {
+  name: 'xigua',
+  cdnPatterns: [/ixigua\.com/i],
+  extract(rawUrl: string, baseUrl: string, _covers: string[]): MediaResource | null {
+    const cleanUrl = rawUrl.replace(/\\\//g, '/');
+    const url = resolveUrl(cleanUrl, baseUrl);
+    if (!url) return null;
+    const streamType = detectStreamingType(url);
+    return makeResource(url, 'video', streamType ?? 'video');
+  },
+};
+
+/** Kuaishou (快手) CDN extractor. */
+const kuaishouExtractor: PlatformExtractor = {
+  name: 'kuaishou',
+  cdnPatterns: [/kwai\w*\.com/i],
+  extract(rawUrl: string, baseUrl: string, _covers: string[]): MediaResource | null {
+    const cleanUrl = rawUrl.replace(/\\\//g, '/');
+    const url = resolveUrl(cleanUrl, baseUrl);
+    if (!url) return null;
+    const streamType = detectStreamingType(url);
+    return makeResource(url, 'video', streamType ?? 'video');
+  },
+};
+
+// Register built-in extractors
+platformExtractors.push(
+  douyinExtractor,
+  tiktokExtractor,
+  xiguaExtractor,
+  kuaishouExtractor,
+);
+
+/**
+ * Register a custom {@link PlatformExtractor} for platform-specific
+ * video CDN URL detection.
+ *
+ * Call this before running `extractVideos()` to add support for
+ * additional platforms.
+ *
+ * @param ext - The extractor to register.
+ *
+ * @public
+ */
+export function registerPlatformExtractor(ext: PlatformExtractor): void {
+  platformExtractors.push(ext);
+}
 
 /**
  * Scan script text for platform-specific CDN video URLs.
- * Extracts full URLs from JSON blobs and inline JavaScript.
+ * Iterates over the registered {@link PlatformExtractor} registry.
  */
 function extractPlatformVideoUrls(
   doc: DocumentLike,
   baseUrl: string,
   results: MediaResource[],
 ): void {
+  if (platformExtractors.length === 0) return;
+
   const scripts = doc.querySelectorAll('script');
   const seen = new Set<string>();
 
-  // Also search for cover/thumbnail images (douyinpic.com, etc.)
-  const coverPattern = /(https?:\/\/[^\s"'`<>{}]*?(?:douyinpic|tiktokcdn.*?(?:thumb|cover))[^\s"'`<>{}]*)/gi;
+  // Collect all cover patterns from registered extractors
+  const allCoverPatterns: RegExp[] = [];
+  for (const ext of platformExtractors) {
+    if (ext.coverPatterns) {
+      allCoverPatterns.push(...ext.coverPatterns);
+    }
+  }
 
   for (const script of scripts) {
     try {
       const text = script.textContent;
       if (!text || text.length < 200) continue;
 
-      // Collect cover URLs from this script
+      // Collect cover URLs from this script using all registered cover patterns
       const covers: string[] = [];
-      let cm: RegExpExecArray | null;
-      while ((cm = coverPattern.exec(text)) !== null) {
-        const u = resolveUrl(cm[0].replace(/\\\//g, '/'), baseUrl);
-        if (u && !covers.includes(u)) covers.push(u);
+      for (const coverPat of allCoverPatterns) {
+        coverPat.lastIndex = 0;
+        let cm: RegExpExecArray | null;
+        while ((cm = coverPat.exec(text)) !== null) {
+          const u = resolveUrl(cm[0].replace(/\\\//g, '/'), baseUrl);
+          if (u && !covers.includes(u)) covers.push(u);
+        }
       }
 
-      for (const { pattern } of PLATFORM_VIDEO_CDNS) {
-        if (!pattern.test(text)) continue;
+      for (const ext of platformExtractors) {
+        // Check if any CDN pattern matches the script text
+        const matches = ext.cdnPatterns.some((p) => p.test(text));
+        if (!matches) continue;
 
-        const urlPattern = /(https?:\/\/[^\s"'`<>{}]*?(?:douyinvod|tiktokcdn|ixigua|kwai\w*)\.[^\s"'`<>{}]*)/gi;
+        // Build a combined regex from the extractor's CDN patterns
+        const urlPattern = buildUrlPattern(ext.cdnPatterns);
+        urlPattern.lastIndex = 0;
         let match: RegExpExecArray | null;
         let i = 0;
         while ((match = urlPattern.exec(text)) !== null) {
@@ -481,21 +522,31 @@ function extractPlatformVideoUrls(
           if (seen.has(rawUrl)) continue;
           seen.add(rawUrl);
 
-          const cleanUrl = rawUrl.replace(/\\\//g, '/');
-          const url = resolveUrl(cleanUrl, baseUrl);
-          if (!url) continue;
-
-          const streamType = detectStreamingType(url);
           const thumb = i < covers.length ? covers[i] : '';
-          results.push(makeResource(url, streamType ?? 'video', thumb || undefined));
-          i++;
+          const resource = ext.extract(rawUrl, baseUrl, thumb ? [thumb] : []);
+          if (resource) {
+            results.push(resource);
+            i++;
+          }
         }
-        break;
+        break; // Only process the first matching platform per script
       }
     } catch {
       // Skip broken script
     }
   }
+}
+
+/**
+ * Build a combined URL regex from a set of CDN patterns.
+ */
+function buildUrlPattern(patterns: RegExp[]): RegExp {
+  const hostnames = patterns.map((p) => p.source.replace(/\\\./g, '.'));
+  const joined = hostnames.join('|');
+  return new RegExp(
+    '(https?:\\/\\/[^\\s"\'`<>{}]*?(?:' + joined + ')\\.[^\\s"\'`<>{}]*)',
+    'gi',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -526,9 +577,9 @@ function extractFromStandaloneSources(
 
       const streamSrc = detectStreamingType(url);
       if (streamSrc) {
-        results.push(makeResource(url, streamSrc));
+        results.push(makeResource(url, 'video', streamSrc));
       } else if (hasVideoExtension(url)) {
-        results.push(makeResource(url, 'video'));
+        results.push(makeResource(url, 'video', 'video'));
       }
     } catch {
       // Skip

@@ -6,3 +6,9 @@ dist/
 .coverage/
 *.log
 .part
+coverage/
+doc/
+doc2/
+doc2/compatibility/results/
+.serena/
+BROKEN.md

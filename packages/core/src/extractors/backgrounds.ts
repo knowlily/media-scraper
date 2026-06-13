@@ -2,8 +2,8 @@
 // @media-scraper/core — background image extractor
 // ---------------------------------------------------------------------------
 
-import type { DocumentLike, ElementLike, MediaResource } from '../types.js';
-import { generateId, extractFilename, getExtension } from '../utils.js';
+import type { DocumentLike, ElementLike, MediaResource, BackgroundResult } from '../types.js';
+import { makeResource } from './helpers.js';
 
 /**
  * Maximum number of elements to scan for inline `style` attributes.
@@ -37,24 +37,6 @@ const GRADIENT_KEYWORDS = /(?:linear-gradient|radial-gradient|conic-gradient|rep
 const GRADIENT_PREFIX = /^\s*(?:linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|repeating-radial-gradient|repeating-conic-gradient)/i;
 
 /**
- * Build a background-image {@link MediaResource} from a resolved URL.
- */
-function makeBackgroundResource(url: string): MediaResource {
-  return {
-    id: generateId(),
-    url,
-    type: 'image',
-    filename: extractFilename(url),
-    extension: getExtension(url),
-    size: 0,
-    width: 0,
-    height: 0,
-    thumbnail: '',
-    source: 'background',
-  };
-}
-
-/**
  * Walk all elements (breadth-first via wildcard selector, up to
  * {@link MAX_ELEMENTS}) and extract image URLs from inline `style`
  * attributes that contain `background-image` or `background` shorthand.
@@ -74,10 +56,18 @@ function walkElements(
   baseUrl: string,
   results: MediaResource[],
   seen: Set<string>,
+  warnings: string[],
 ): void {
   // Collect all descendant elements via universal selector.
   const all: ElementLike[] = root.querySelectorAll('*');
   const limit = Math.min(all.length, MAX_ELEMENTS);
+
+  if (all.length > MAX_ELEMENTS) {
+    warnings.push(
+      `Background extraction: reached element limit (${MAX_ELEMENTS}/${all.length}), ` +
+      `${all.length - MAX_ELEMENTS} elements were skipped.`,
+    );
+  }
 
   for (let i = 0; i < limit; i++) {
     const el = all[i];
@@ -135,7 +125,7 @@ function walkElements(
           const resolved = new URL(raw, baseUrl).href;
           if (seen.has(resolved)) continue;
           seen.add(resolved);
-          results.push(makeBackgroundResource(resolved));
+          results.push(makeResource(resolved, 'image', 'background'));
         } catch {
           // skip unparseable URLs
         }
@@ -163,15 +153,16 @@ function walkElements(
 export function extractBackgroundImages(
   doc: DocumentLike,
   baseUrl: string,
-): MediaResource[] {
+): BackgroundResult {
   const results: MediaResource[] = [];
+  const warnings: string[] = [];
   const seen = new Set<string>();
 
   // Start from the body if available; otherwise fall back to the document root.
   const startEl: ElementLike | null = doc.body ?? doc.querySelector('body');
   if (startEl) {
-    walkElements(startEl, baseUrl, results, seen);
+    walkElements(startEl, baseUrl, results, seen, warnings);
   }
 
-  return results;
+  return { resources: results, warnings };
 }

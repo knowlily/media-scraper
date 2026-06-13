@@ -1,15 +1,35 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-// ── Types imported from core (skeleton — will be filled in) ─────────────────
+// ── Types imported from core ──────────────────────────────────────────────
 import type {
   MediaResource,
   ScrapeResult,
-  DownloadResult,
 } from "@media-scraper/core";
 
+// ── V2: Streaming scrape from core ────────────────────────────────────────
+import { scrapeStream } from "@media-scraper/core";
+import type { StreamYield } from "@media-scraper/core";
+
+// ── V2: StealthBrowser from browser package ───────────────────────────────
+import { launch } from "@media-scraper/browser";
+
+// ── V2: DownloadManager from downloader package ───────────────────────────
+import { DownloadManager } from "@media-scraper/downloader";
+import type { DownloadResult as DMResult, MediaResource as DMResource } from "@media-scraper/downloader";
+
+// ── DOM parser for scrapeStream ───────────────────────────────────────────
+import { JSDOM } from "jsdom";
+import type { DocumentLike } from "@media-scraper/core";
+
 // ── Re-export for convenience ──────────────────────────────────────────────
-export type { MediaResource, ScrapeResult, DownloadResult };
+export type { MediaResource, ScrapeResult };
+
+// ── Download result type (local) ────────────────────────────────────────────
+export interface DownloadResult {
+  downloaded: string[];
+  failed: string[];
+}
 
 // ── Parameter Schemas ──────────────────────────────────────────────────────
 
@@ -87,17 +107,137 @@ const DownloadMediaSchema = z.object({
 // ── Progress helper ────────────────────────────────────────────────────────
 
 function notify(server: McpServer, message: string, extra?: { sessionId?: string }) {
-  // Report progress via server logging — appears as notifications to the client.
-  // Falls back to stderr so the message is at least visible in server logs.
   server
     .sendLoggingMessage(
       { level: "info", data: `[media-scraper] ${message}` },
       extra?.sessionId
     )
     .catch(() => {
-      // Best-effort: don't let logging failure crash the handler
       console.error(`[media-scraper] ${message}`);
     });
+}
+
+// ── V2: Scrape Engine (StealthBrowser + scrapeStream) ──────────────────────
+
+async function scrapeUrl(url: string, opts?: {
+  types?: string[];
+  minSize?: number;
+  maxPages?: number;
+  timeout?: number;
+}): Promise<ScrapeResult> {
+  const browser = await launch({ headless: true, userAgent: "pool" });
+  const startTime = Date.now();
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, {
+      timeout: opts?.timeout ?? 30000,
+      waitUntil: "domcontentloaded",
+    });
+
+    // Lazy-load scroll
+    await page.scrollToTriggerLazy();
+
+    // Get page content
+    const html = await page.content();
+    const title = await page.raw.title();
+
+    // Parse HTML into DocumentLike using jsdom
+    const dom = new JSDOM(html, { url });
+    const doc = dom.window.document as unknown as DocumentLike;
+
+    // Stream scrape
+    const errors: import("@media-scraper/core").ScrapeError[] = [];
+    let allResources: MediaResource[] = [];
+
+    let domNodeCount = 0;
+    try {
+      domNodeCount = doc.querySelectorAll("*").length;
+    } catch {
+      // ignore
+    }
+
+    for await (const frame of scrapeStream(doc, url)) {
+      allResources = frame.cumulative;
+      errors.push(...frame.errors);
+    }
+
+    // Categorize from the final cumulative
+    const images: MediaResource[] = [];
+    const videos: MediaResource[] = [];
+    const audio: MediaResource[] = [];
+    const documents: MediaResource[] = [];
+
+    const keep = opts?.types?.length ? new Set(opts.types) : null;
+
+    for (const r of allResources) {
+      if (keep && !keep.has(r.type)) continue;
+      if (opts?.minSize && r.size > 0 && r.size < opts.minSize) continue;
+
+      switch (r.type) {
+        case "image": images.push(r); break;
+        case "video": videos.push(r); break;
+        case "audio": audio.push(r); break;
+        case "document": documents.push(r); break;
+        default: images.push(r); break;
+      }
+    }
+
+    const total = images.length + videos.length + audio.length + documents.length;
+    const duration = Date.now() - startTime;
+
+    return {
+      url,
+      title,
+      total,
+      images,
+      videos,
+      audio,
+      documents,
+      warnings: [],
+      duration,
+      timestamp: new Date().toISOString(),
+      errors,
+      partial: errors.length > 0,
+      stats: {
+        durationMs: duration,
+        domNodeCount,
+        deduplicatedCount: 0,
+        filteredCount: 0,
+      },
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+// ── V2: Download Engine (DownloadManager) ───────────────────────────────────
+
+async function downloadResources(
+  resources: Array<{ url: string; filename?: string }>,
+  outputDir: string,
+  concurrency = 3,
+  onProgress?: (current: number, total: number, file: string) => void,
+): Promise<DownloadResult> {
+  const dmResources: DMResource[] = resources.map((r) => ({
+    url: r.url,
+    filename: r.filename,
+  }));
+
+  const manager = new DownloadManager({
+    outputDir,
+    concurrency,
+    onProgress: (progress) => {
+      onProgress?.(progress.completed, progress.total, progress.currentUrl);
+    },
+  });
+
+  const result: DMResult = await manager.downloadAll(dmResources);
+
+  return {
+    downloaded: result.succeeded,
+    failed: result.failed.map((f) => f.url),
+  };
 }
 
 // ── Tool registration ──────────────────────────────────────────────────────
@@ -138,13 +278,11 @@ export function registerTools(server: McpServer): void {
         extra
       );
 
-      // ---------- call CLI ----------
+      // ---------- scrape via StealthBrowser + scrapeStream ----------
       try {
-        const { scrapeMedia } = await import("@media-scraper/cli");
-
         notify(server, `Scraping in progress…`, extra);
 
-        const result: ScrapeResult = await scrapeMedia(url, {
+        const result: ScrapeResult = await scrapeUrl(url, {
           types,
           minSize,
           maxPages,
@@ -153,7 +291,7 @@ export function registerTools(server: McpServer): void {
 
         notify(
           server,
-          `Scrape complete — found ${result.resources?.length ?? 0} resources`,
+          `Scrape complete — found ${result.total} resources`,
           extra
         );
 
@@ -224,30 +362,25 @@ export function registerTools(server: McpServer): void {
         extra
       );
 
-      // ---------- call CLI ----------
+      // ---------- download via DownloadManager ----------
       try {
-        const { downloadMedia } = await import("@media-scraper/cli");
-
         notify(
           server,
           `Download in progress (concurrency: ${concurrency ?? 3})…`,
           extra
         );
 
-        const result: DownloadResult = await downloadMedia(
-          resources as MediaResource[],
+        const result: DownloadResult = await downloadResources(
+          resources,
           outputDir,
-          {
-            concurrency,
-            organizeByType,
-            onProgress: (current: number, total: number, file: string) => {
-              notify(
-                server,
-                `[${current}/${total}] Downloaded: ${file}`,
-                extra
-              );
-            },
-          }
+          concurrency ?? 3,
+          (current: number, total: number, file: string) => {
+            notify(
+              server,
+              `[${current}/${total}] Downloaded: ${file}`,
+              extra
+            );
+          },
         );
 
         notify(server, `Download complete`, extra);

@@ -3,28 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import type { ElementLike, MediaResource, MediaType } from '../types.js';
-import { generateId, extractFilename, getExtension, isMediaUrl } from '../utils.js';
-
-/**
- * Build a {@link MediaResource} for media discovered inside Shadow DOM.
- */
-function makeShadowResource(
-  resolved: string,
-  type: 'image' | 'video' | 'audio' | 'document' | 'unknown',
-): MediaResource {
-  return {
-    id: generateId(),
-    url: resolved,
-    type,
-    filename: extractFilename(resolved),
-    extension: getExtension(resolved),
-    size: 0,
-    width: 0,
-    height: 0,
-    thumbnail: '',
-    source: 'shadow-dom',
-  };
-}
+import { isMediaUrl } from '../utils.js';
+import { makeResource } from './helpers.js';
 
 /**
  * Recursively scan an element tree for media-bearing nodes.
@@ -48,7 +28,7 @@ function scanTree(
       if (seen.has(resolved)) return;
       seen.add(resolved);
       const type = hint ?? isMediaUrl(resolved) ?? 'unknown';
-      results.push(makeShadowResource(resolved, type));
+      results.push(makeResource(resolved, type, 'shadow-dom'));
     } catch {
       // skip unparseable URLs
     }

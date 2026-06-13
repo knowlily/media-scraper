@@ -3,7 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import type { DocumentLike, ElementLike, MediaResource } from '../types.js';
-import { generateId, extractFilename, getExtension, isMediaUrl } from '../utils.js';
+import { isMediaUrl } from '../utils.js';
+import { makeResource } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 // Known video platform patterns
@@ -222,29 +223,6 @@ function matchPlatform(href: string): (PlatformMatch & { id: string }) | null {
 }
 
 /**
- * Build a {@link MediaResource} for an iframe media item.
- */
-function makeIframeResource(
-  url: string,
-  type: 'video' | 'image' | 'audio' | 'document' | 'unknown',
-  thumbnail: string,
-  sourceUrl: string,
-): MediaResource {
-  return {
-    id: generateId(),
-    url,
-    type,
-    filename: extractFilename(sourceUrl),
-    extension: getExtension(sourceUrl),
-    size: 0,
-    width: 0,
-    height: 0,
-    thumbnail,
-    source: 'iframe',
-  };
-}
-
-/**
  * Extract media from `<iframe>` elements in a DOM-like document.
  *
  * Examines every `<iframe src>` attribute.  When the `src` points to a known
@@ -284,26 +262,14 @@ export function extractIframeMedia(
 
       const platform = matchPlatform(resolved);
       if (platform) {
-        // Known video platform — store the canonical page/video URL.
-        results.push(
-          makeIframeResource(
-            resolved,        // the iframe src URL itself
-            'video',
-            platform.thumbnail(platform.id),
-            resolved,
-          ),
-        );
+        // Known video platform — store the iframe src URL as a video resource.
+        const thumb = platform.thumbnail(platform.id);
+        results.push(makeResource(resolved, 'video', 'iframe',
+          thumb ? { thumbnail: thumb } : undefined));
       } else {
         // Unrecognised iframe — classify by extension.
         const detected = isMediaUrl(resolved);
-        results.push(
-          makeIframeResource(
-            resolved,
-            detected ?? 'unknown',
-            '',
-            resolved,
-          ),
-        );
+        results.push(makeResource(resolved, detected ?? 'unknown', 'iframe'));
       }
     } catch {
       // skip unparseable URLs

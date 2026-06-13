@@ -71,4 +71,11 @@ sharedOptions(
     }
   });
 
-program.parse();
+// Only parse when executed directly (not when imported for testing)
+const isDirectExecution =
+  process.argv[1] &&
+  (process.argv[1].endsWith('index.js') || process.argv[1].endsWith('index.ts'));
+
+if (isDirectExecution) {
+  program.parse();
+}

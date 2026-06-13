@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "一键提取网页中所有图片、视频、音频和文档",
   "permissions": ["activeTab", "downloads", "scripting", "storage"],
-  "optional_permissions": ["<all_urls>"],
+  "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Media Scraper"

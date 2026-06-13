@@ -1,0 +1,93 @@
+name: Compatibility Testing
+
+on:
+  schedule:
+    # Every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Single URL to test (debug mode)'
+        required: false
+        type: string
+        default: ''
+      category:
+        description: 'Category filter (e.g. news, spa, video)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run compatibility tests
+        id: compat
+        run: |
+          cd doc2/compatibility
+          if [ -n "${{ github.event.inputs.url }}" ]; then
+            npx tsx runner.ts --url "${{ github.event.inputs.url }}"
+          elif [ -n "${{ github.event.inputs.category }}" ]; then
+            npx tsx runner.ts --category "${{ github.event.inputs.category }}"
+          else
+            npx tsx runner.ts --all
+          fi
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-results
+          path: doc2/compatibility/results/
+          retention-days: 30
+
+      - name: Check pass rate
+        if: always()
+        run: |
+          if [ -f doc2/compatibility/results/$(date +%Y-%m-%d).json ]; then
+            echo "=== Compatibility Test Results ==="
+            cat doc2/compatibility/results/$(date +%Y-%m-%d).json | \
+              npx -y node -e "
+                const r = require('fs').readFileSync('/dev/stdin','utf8');
+                const d = JSON.parse(r);
+                console.log('Total:', d.total);
+                console.log('Passed:', d.passed);
+                console.log('Failed:', d.failed);
+                console.log('Pass Rate:', d.pass_rate + '%');
+                if (d.pass_rate < 80) {
+                  console.log('::warning::Pass rate below 80% threshold!');
+                  process.exit(1);
+                }
+              "
+          fi
+
+      - name: Notify on low pass rate
+        if: failure() && steps.compat.outcome == 'failure'
+        run: |
+          echo "::error::Compatibility pass rate dropped below 80%. Check the uploaded artifact for details."

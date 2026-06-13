@@ -17,13 +17,16 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@media-scraper/cli": "workspace:*",
+    "@media-scraper/browser": "workspace:*",
     "@media-scraper/core": "workspace:*",
+    "@media-scraper/downloader": "workspace:*",
     "@modelcontextprotocol/sdk": "^1",
+    "jsdom": "^25",
     "playwright": "^1.50",
     "zod": "^3"
   },
   "devDependencies": {
+    "@types/jsdom": "^21",
     "@types/node": "^20",
     "typescript": "^5.5",
     "vitest": "^2"

@@ -1,8 +1,10 @@
 /**
- * Playwright browser wrapper with stealth settings and anti-bot strategies.
+ * Browser wrapper — delegates to @media-scraper/browser for stealth-enhanced
+ * Chromium launch and page navigation, while keeping CLI-specific helpers
+ * (extraction, scrolling, metrics) as thin adapters.
  */
 
-import type { Browser, BrowserContext, Page } from 'playwright';
+import { launch as stealthLaunch, StealthBrowser, StealthPage, DEFAULT_STEALTH_OPTIONS } from '@media-scraper/browser';
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -33,105 +35,38 @@ export interface PageMetrics {
   loadTimeMs: number;
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-/** Random delay between `min` and `max` ms to mimic human behaviour. */
-function randomDelay(min = 100, max = 500): Promise<void> {
-  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 // ── Launch ──────────────────────────────────────────────────────────────
 
-let _playwright: typeof import('playwright') | null = null;
-
-async function getPlaywright(): Promise<typeof import('playwright')> {
-  if (!_playwright) {
-    _playwright = await import('playwright');
-  }
-  return _playwright;
-}
-
 /**
- * Launch a Chromium browser with stealth settings.
+ * Launch a stealth-enhanced Chromium browser via @media-scraper/browser.
  */
 export async function launch(
   options: LaunchOptions = {},
-): Promise<{ browser: Browser; context: BrowserContext }> {
-  const { chromium } = await getPlaywright();
-
-  const launchArgs: string[] = [
-    // ── Hide automation traces ───────────────────────────────────────
-    '--disable-blink-features=AutomationControlled',
-    '--disable-features=IsolateOrigins,site-per-process',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-infobars',
-    '--disable-dev-shm-usage',
-    // ── GPU / rendering ──────────────────────────────────────────────
-    '--disable-gpu',
-    '--disable-web-security',
-    '--disable-features=VizDisplayCompositor',
-  ];
-
-  if (options.proxy) {
-    launchArgs.push(`--proxy-server=${options.proxy}`);
-  }
-
-  const browser = await chromium.launch({
+): Promise<{ browser: StealthBrowser }> {
+  const browser = await stealthLaunch({
     headless: options.headless ?? true,
-    args: launchArgs,
+    stealth: { ...DEFAULT_STEALTH_OPTIONS },
+    userAgent: options.userAgent,
+    proxy: options.proxy ? { server: options.proxy } : undefined,
   });
 
-  const context = await browser.newContext({
-    userAgent:
-      options.userAgent ??
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    viewport: { width: 1920, height: 1080 },
-    deviceScaleFactor: 1,
-    locale: 'en-US',
-    // Stealth: disable permission prompts, geolocation, notifications
-    permissions: [],
-    geolocation: undefined,
-  });
-
-  // ── Stealth: Override navigator.webdriver ─────────────────────────
-  await context.addInitScript(() => {
-    // @ts-expect-error – patching navigator
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-
-    // Override Chrome runtime for detection evasion
-    // @ts-expect-error – patching window.chrome
-    window.chrome = { runtime: {} };
-
-    // Override permissions query
-    const originalQuery = window.navigator.permissions.query;
-    // @ts-expect-error – patching permissions.query
-    window.navigator.permissions.query = (parameters: PermissionDescriptor) =>
-      parameters.name === 'notifications'
-        ? Promise.resolve({
-            state: Notification.permission as PermissionState,
-          } as PermissionStatus)
-        : originalQuery(parameters);
-  });
-
-  return { browser, context };
+  return { browser };
 }
 
 // ── Page ────────────────────────────────────────────────────────────────
 
 /**
- * Navigate to `url`, wait for the page to load, handle timeouts gracefully.
+ * Navigate to `url` using StealthPage.goto(), with timeout fallback.
  */
 export async function loadPage(
-  context: BrowserContext,
+  browser: StealthBrowser,
   url: string,
   options: PageLoadOptions = {},
-): Promise<Page> {
-  const page = await context.newPage();
+): Promise<StealthPage> {
+  const page = await browser.newPage();
 
   const timeout = options.timeout ?? 30_000;
-  const waitUntil = options.waitUntil ?? 'networkidle';
+  const waitUntil = (options.waitUntil ?? 'networkidle') as 'load' | 'networkidle' | 'domcontentloaded';
 
   try {
     await page.goto(url, { timeout, waitUntil });
@@ -156,44 +91,40 @@ export async function loadPage(
 
 /**
  * Scroll the page to trigger lazy-loaded content (images, infinite scroll).
- * Scrolls through `maxPages` viewport-heights worth of content.
  */
 export async function scrollToTriggerLazy(
-  page: Page,
+  page: StealthPage,
   options: ScrollOptions = {},
 ): Promise<void> {
   const maxPages = options.maxPages ?? 3;
   const scrollDelay = options.scrollDelay ?? 800;
 
   for (let i = 0; i < maxPages; i++) {
-    await randomDelay(scrollDelay / 2, scrollDelay);
+    await new Promise((r) => setTimeout(r, scrollDelay));
 
-    await page.evaluate(() => {
+    await page.raw.evaluate(() => {
       window.scrollBy(0, window.innerHeight);
     });
 
-    // Wait for any network activity to settle
-    await page.waitForLoadState('networkidle').catch(() => {
+    await page.raw.waitForLoadState('networkidle').catch(() => {
       /* ignore */
     });
 
-    await randomDelay(300, 600);
+    await new Promise((r) => setTimeout(r, 300 + Math.random() * 300));
   }
 
   // Scroll back to top
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await randomDelay(200, 400);
+  await page.raw.evaluate(() => window.scrollTo(0, 0));
+  await new Promise((r) => setTimeout(r, 200 + Math.random() * 200));
 }
 
 // ── Extraction ──────────────────────────────────────────────────────────
 
 /**
- * Inject and run extraction logic. Delegates to @media-scraper/core.
- * If @media-scraper/core is not yet available, falls back to a basic
- * pass-through that returns the raw page DOM for the core to process.
+ * Inject and run extraction logic on the page.
  */
 export async function executeExtraction(
-  page: Page,
+  page: StealthPage,
   options: ExtractionOptions,
 ): Promise<{
   resources: Array<{
@@ -203,28 +134,7 @@ export async function executeExtraction(
     filename: string;
   }>;
 }> {
-  // ── Try to use @media-scraper/core ─────────────────────────────────
-  try {
-    const core = await import('@media-scraper/core');
-    if (core.extractMedia) {
-      // Core extraction: inject the core's extraction script into the page
-      const rawData = await page.evaluate(core.extractMedia.toString());
-      // Then let core process it
-      const result = await core.processExtraction(rawData, {
-        types: options.types,
-        minSize: options.minSize,
-      });
-      return { resources: result.resources ?? [] };
-    }
-  } catch {
-    // Fallback: core not installed yet — extract raw media links
-    process.stderr.write(
-      '[INFO] @media-scraper/core not available, using built-in fallback extraction\n',
-    );
-  }
-
-  // ── Built-in fallback extraction ───────────────────────────────────
-  const resources = await page.evaluate(
+  const resources = await page.raw.evaluate(
     ({ types, minSize }: { types: string[]; minSize?: number }) => {
       const results: Array<{
         url: string;
@@ -340,16 +250,16 @@ export async function executeExtraction(
 /**
  * Get basic page metrics: title and approximate load time.
  */
-export async function getPageMetrics(page: Page): Promise<PageMetrics> {
+export async function getPageMetrics(page: StealthPage): Promise<PageMetrics> {
   const startTime = Date.now();
 
-  const title = await page.title().catch(() => 'Unknown');
+  const title = await page.raw.title().catch(() => 'Unknown');
 
   const loadTimeMs = Date.now() - startTime;
 
   // Try to get Navigation Timing API data for more accurate load time
   try {
-    const navTiming = await page.evaluate(() => {
+    const navTiming = await page.raw.evaluate(() => {
       const timing = performance.getEntriesByType(
         'navigation',
       )[0] as PerformanceNavigationTiming;
@@ -373,6 +283,6 @@ export async function getPageMetrics(page: Page): Promise<PageMetrics> {
 /**
  * Gracefully close the browser instance.
  */
-export async function close(browser: Browser): Promise<void> {
+export async function close(browser: StealthBrowser): Promise<void> {
   await browser.close();
 }

@@ -2,7 +2,7 @@
 // @media-scraper/core — utils.test.ts
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { generateId, extractFilename, getExtension, isMediaUrl } from '../utils.js';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,23 @@ describe('generateId', () => {
   it('returns a non-empty string every time', () => {
     for (let i = 0; i < 20; i++) {
       expect(generateId().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('falls back to timestamp+random when crypto.randomUUID is unavailable', () => {
+    // Temporarily remove crypto.randomUUID to trigger the fallback path
+    const originalCrypto = globalThis.crypto;
+    vi.stubGlobal('crypto', {
+      randomUUID: undefined,
+    });
+    try {
+      const id = generateId();
+      expect(typeof id).toBe('string');
+      expect(id.length).toBeGreaterThan(0);
+      // Fallback format is <timestamp36>-<random8>
+      expect(id).toMatch(/^[a-z0-9]+-[a-z0-9]+$/);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });
@@ -207,8 +224,8 @@ describe('isMediaUrl', () => {
     expect(isMediaUrl('https://example.com/stream.flv')).toBe('video');
   });
 
-  it('returns "video" for .ogg', () => {
-    expect(isMediaUrl('https://example.com/video.ogg')).toBe('video');
+  it('returns "video" for .ogv', () => {
+    expect(isMediaUrl('https://example.com/video.ogv')).toBe('video');
   });
 
   // --- Audio extensions ---
@@ -221,8 +238,7 @@ describe('isMediaUrl', () => {
   });
 
   it('returns "audio" for .ogg', () => {
-    // Note: .ogg is also in the video list — it matches 'video' first in the switch
-    expect(isMediaUrl('https://example.com/audio.ogg')).toBe('video');
+    expect(isMediaUrl('https://example.com/audio.ogg')).toBe('audio');
   });
 
   it('returns "audio" for .flac', () => {

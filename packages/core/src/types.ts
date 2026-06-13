@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 /** Category of extracted media. */
-export type MediaType = 'image' | 'video' | 'audio' | 'document' | 'unknown';
+export type MediaType = 'image' | 'video' | 'audio' | 'document' | 'unknown' | 'mixed';
 
 /**
  * Origin within the page from which a media resource was discovered.
@@ -55,6 +55,52 @@ export interface MediaResource {
   thumbnail: string;
   /** How this resource was discovered on the page. */
   source: MediaSource;
+  /** Alt text from the element (e.g. `<img alt="..."`>). */
+  alt?: string;
+  /** Title text from the element (e.g. `<a title="..."`>). */
+  title?: string;
+  /** Whether this URL represents a live/streaming resource (m3u8, mpd, etc.). */
+  isStreaming?: boolean;
+  /** Content length in bytes (when available from headers). */
+  contentLength?: number;
+  /** MIME type of the resource (e.g. "image/jpeg"). */
+  mimeType?: string;
+  /** Duration in seconds (for video/audio). */
+  duration?: number;
+  /** Bitrate in bits per second (for video/audio). */
+  bitrate?: number;
+  /** Text surrounding the media element in the DOM. */
+  surroundingText?: string;
+  /** Page-level context from which the resource was extracted. */
+  pageContext?: {
+    title: string;
+    description?: string;
+    ogTitle?: string;
+  };
+}
+
+/** Structured error captured during scraping. */
+export interface ScrapeError {
+  /** The phase/parser where the error occurred. */
+  phase: string;
+  /** Category of the error. */
+  type: 'network' | 'parse' | 'timeout' | 'memory' | 'ssl' | 'csp';
+  /** Human-readable error message. */
+  message: string;
+  /** Whether the scrape can still produce meaningful partial results. */
+  recoverable: boolean;
+}
+
+/** Statistics collected during a scrape. */
+export interface ScrapeStats {
+  /** How long the scrape took (milliseconds). */
+  durationMs: number;
+  /** Total number of DOM nodes examined. */
+  domNodeCount: number;
+  /** Number of resources removed by deduplication. */
+  deduplicatedCount: number;
+  /** Number of resources removed by filters. */
+  filteredCount: number;
 }
 
 /** The result of scraping a single URL. */
@@ -73,10 +119,26 @@ export interface ScrapeResult {
   audio: MediaResource[];
   /** Discovered documents. */
   documents: MediaResource[];
+  /** Warnings collected during extraction (e.g. element limits reached). */
+  warnings: string[];
   /** How long the scrape took (milliseconds). */
   duration: number;
   /** ISO-8601 timestamp of when the scrape completed. */
   timestamp: string;
+  /** Structured errors encountered during scraping. */
+  errors: ScrapeError[];
+  /** Whether this result is partial (some phases failed). */
+  partial: boolean;
+  /** Statistics collected during the scrape. */
+  stats: ScrapeStats;
+}
+
+/** Result of background-image extraction, including any warnings. */
+export interface BackgroundResult {
+  /** Discovered background-image resources. */
+  resources: MediaResource[];
+  /** Warnings (e.g. MAX_ELEMENTS limit reached). */
+  warnings: string[];
 }
 
 /** Options that control scraping behaviour. */
@@ -166,4 +228,59 @@ export interface ElementLike {
   querySelectorAll(selector: string): ElementLike[];
   querySelector(selector: string): ElementLike | null;
   textContent: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Deduplication interface (injectable, no hard dependency)
+// ---------------------------------------------------------------------------
+
+/**
+ * Abstract interface for resource deduplication.
+ *
+ * Implementations can provide advanced deduplication strategies (perceptual
+ * hashing, fuzzy matching, etc.) but the core package only depends on this
+ * shape — it never imports a concrete deduplication library.
+ */
+export interface DeduplicatorLike {
+  /**
+   * Deduplicate an array of media resources.
+   *
+   * @param resources - The resources to deduplicate.
+   * @returns A deduplicated array of resources.
+   */
+  deduplicate(resources: MediaResource[]): MediaResource[];
+}
+
+// ---------------------------------------------------------------------------
+// Platform extractor plugin interface
+// ---------------------------------------------------------------------------
+
+/**
+ * A pluggable extractor for platform-specific video CDN URLs.
+ *
+ * Implement this interface and register it via
+ * {@link registerPlatformExtractor} to add support for new platforms
+ * without modifying the core video extractor.
+ */
+export interface PlatformExtractor {
+  /** Human-readable platform name (e.g. 'douyin'). */
+  name: string;
+  /** Regex patterns that match the platform's CDN hostnames. */
+  cdnPatterns: RegExp[];
+  /** Optional regex patterns for cover / thumbnail image URLs. */
+  coverPatterns?: RegExp[];
+  /**
+   * Extract a {@link MediaResource} from a raw URL discovered in page
+   * scripts.
+   *
+   * @param rawUrl - The raw CDN URL (may contain escaped slashes).
+   * @param baseUrl - The page's base URL for resolution.
+   * @param covers - Cover/thumbnail URLs collected from the same script.
+   * @returns A {@link MediaResource} or `null` if the URL is not relevant.
+   */
+  extract(
+    rawUrl: string,
+    baseUrl: string,
+    covers: string[],
+  ): MediaResource | null;
 }

@@ -3,41 +3,11 @@
 // ---------------------------------------------------------------------------
 
 import type { DocumentLike, ElementLike, MediaResource, MediaSource } from '../types.js';
-import { generateId, extractFilename, getExtension } from '../utils.js';
-
-/** Audio file extensions to match on `<a href>` links. */
-const AUDIO_EXTENSIONS = new Set([
-  '.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma', '.opus', '.weba',
-]);
+import { getExtension } from '../utils.js';
+import { resolveUrl, makeResource, AUDIO_EXTENSIONS } from './helpers.js';
 
 /** Known audio streaming extensions. */
 const AUDIO_STREAM_EXTENSIONS = new Set(['.m3u8', '.mpd', '.pls', '.m3u']);
-
-/**
- * Build an audio {@link MediaResource} from a resolved URL.
- */
-function makeAudioResource(url: string, source?: MediaSource): MediaResource {
-  return {
-    id: generateId(),
-    url,
-    type: 'audio',
-    filename: extractFilename(url),
-    extension: getExtension(url),
-    size: 0,
-    width: 0,
-    height: 0,
-    thumbnail: '',
-    source: source ?? 'audio',
-  };
-}
-
-/** Resolve a potentially-relative URL, skipping data: / blob: URLs. */
-function resolveUrl(href: string, baseUrl: string): string | null {
-  if (!href) return null;
-  const trimmed = href.trim();
-  if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return null;
-  try { return new URL(trimmed, baseUrl).href; } catch { return null; }
-}
 
 /** Check if a URL points to an audio stream (m3u8, mpd, pls, m3u). */
 function isAudioStream(url: string): MediaSource | null {
@@ -79,7 +49,7 @@ export function extractAudio(doc: DocumentLike, baseUrl: string): MediaResource[
       const resolved = new URL(rawUrl, baseUrl).href;
       if (seen.has(resolved)) return;
       seen.add(resolved);
-      results.push(makeAudioResource(resolved, source));
+      results.push(makeResource(resolved, 'audio', source ?? 'audio'));
     } catch {
       // skip unparseable URLs
     }
@@ -127,7 +97,7 @@ export function extractAudio(doc: DocumentLike, baseUrl: string): MediaResource[
         if (seen.has(resolved)) continue;
         seen.add(resolved);
         const stream = isAudioStream(resolved);
-        results.push(makeAudioResource(resolved, stream ?? 'link'));
+        results.push(makeResource(resolved, 'audio', stream ?? 'link'));
       }
     } catch {
       // skip
@@ -194,7 +164,7 @@ export function extractAudio(doc: DocumentLike, baseUrl: string): MediaResource[
         if (url && !seen.has(url)) {
           seen.add(url);
           const stream = isAudioStream(url);
-          results.push(makeAudioResource(url, stream ?? 'audio'));
+          results.push(makeResource(url, 'audio', stream ?? 'audio'));
         }
       }
     } catch {

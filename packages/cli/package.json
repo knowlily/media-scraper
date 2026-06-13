@@ -16,7 +16,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@media-scraper/browser": "workspace:*",
     "@media-scraper/core": "workspace:*",
+    "@media-scraper/downloader": "workspace:*",
     "playwright": "^1.48",
     "commander": "^12"
   },

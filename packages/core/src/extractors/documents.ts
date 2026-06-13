@@ -3,35 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import type { DocumentLike, ElementLike, MediaResource } from '../types.js';
-import { generateId, extractFilename, getExtension } from '../utils.js';
-
-/** Document / archive file extensions to match on `<a href>` links. */
-const DOCUMENT_EXTENSIONS = new Set([
-  '.pdf',
-  '.doc', '.docx',
-  '.xls', '.xlsx',
-  '.ppt', '.pptx',
-  '.zip', '.rar', '.7z', '.tar', '.gz',
-  '.epub', '.mobi',
-]);
-
-/**
- * Build a document {@link MediaResource} from a resolved URL.
- */
-function makeDocumentResource(url: string): MediaResource {
-  return {
-    id: generateId(),
-    url,
-    type: 'document',
-    filename: extractFilename(url),
-    extension: getExtension(url),
-    size: 0,
-    width: 0,
-    height: 0,
-    thumbnail: '',
-    source: 'link',
-  };
-}
+import { getExtension } from '../utils.js';
+import { makeResource, DOCUMENT_EXTENSIONS } from './helpers.js';
 
 /**
  * Extract document download links from a DOM-like document.
@@ -70,7 +43,7 @@ export function extractDocuments(doc: DocumentLike, baseUrl: string): MediaResou
       if (ext && DOCUMENT_EXTENSIONS.has(ext)) {
         if (seen.has(resolved)) continue;
         seen.add(resolved);
-        results.push(makeDocumentResource(resolved));
+        results.push(makeResource(resolved, 'document', 'link'));
       }
     } catch {
       // skip unparseable URLs
