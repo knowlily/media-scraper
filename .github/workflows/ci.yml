@@ -7,19 +7,24 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 18
+        with: { node-version: 18, cache: pnpm }
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - run: pnpm run lint
       - run: pnpm run typecheck
+
+      - run: cd packages/mcp && pnpm exec playwright install chromium --with-deps
+
       - run: cd packages/core && npx vitest run
       - run: cd packages/dedupe && npx vitest run
       - run: cd packages/downloader && npx vitest run
       - run: cd packages/cli && npx vitest run
       - run: cd packages/extension && npx vitest run
+      - run: cd packages/browser && npx vitest run
+      - run: cd packages/mcp && npx vitest run
