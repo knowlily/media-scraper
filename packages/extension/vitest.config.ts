@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     pool: 'threads',
+    deps: { inline: [/@exodus\/bytes/] },
     include: ['src/**/*.test.ts'],
     setupFiles: ['./src/__tests__/setup.ts'],
     coverage: {
