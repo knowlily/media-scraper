@@ -25,11 +25,14 @@ describe('generateId', () => {
   });
 
   it('matches UUID format when crypto.randomUUID is available', () => {
-    // In modern environments, crypto.randomUUID() returns a standard UUID v4
+    // crypto.randomUUID() returns UUID v4 in modern Node/Browser; fallback uses timestmap+random
     const id = generateId();
-    // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    // UUID v4: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    expect(id).toMatch(uuidRegex);
+    // Fallback: <timestamp36>-<random8>
+    const fallbackRegex = /^[0-9a-z]+-[0-9a-z]+$/i;
+    const hasUUID = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function';
+    expect(id).toMatch(hasUUID ? uuidRegex : fallbackRegex);
   });
 
   it('returns a non-empty string every time', () => {
