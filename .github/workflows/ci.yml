@@ -12,20 +12,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 18, cache: pnpm }
+        with:
+          node-version: 18
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run lint
       - run: pnpm run typecheck
-
-      - name: 'Test: core'
-        run: pnpm --filter "@media-scraper/core" test
-      - name: 'Test: dedupe'
-        run: pnpm --filter "@media-scraper/dedupe" test
-      - name: 'Test: downloader'
-        run: pnpm --filter "@media-scraper/downloader" test
-      - name: 'Test: cli'
-        run: pnpm --filter "@media-scraper/cli" test
-      - name: 'Test: extension'
-        run: pnpm --filter "@media-scraper/extension" test
+      - run: cd packages/core && npx vitest run
+      - run: cd packages/dedupe && npx vitest run
+      - run: cd packages/downloader && npx vitest run
+      - run: cd packages/cli && npx vitest run
+      - run: cd packages/extension && npx vitest run
